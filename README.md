@@ -34,10 +34,10 @@ A instalação registra o comando `pylibre` no `PATH`.
 ## Uso
 
 ```bash
-pylibre livro.epub                  # gera livro.txt ao lado do EPUB
-pylibre livro.epub -o saida.txt     # escolhe o nome do arquivo de saída
-pylibre --no-meta livro.epub        # sem o cabeçalho de título/autor
-pylibre a.epub b.epub               # converte vários EPUBs de uma vez
+python3 pylibre livro.epub                  # gera livro.txt ao lado do EPUB
+python3 pylibre livro.epub -o saida.txt     # escolhe o nome do arquivo de saída
+python3 pylibre --no-meta livro.epub        # sem o cabeçalho de título/autor
+python3 pylibre a.epub b.epub               # converte vários EPUBs de uma vez
 ```
 
 ### Opções
