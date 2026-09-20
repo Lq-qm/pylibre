@@ -22,7 +22,7 @@ O projeto usa apenas a **biblioteca padrão do Python** — não há dependênci
 A instalação é opcional — o projeto também pode ser usado sem instalar (ver [Uso](#rodando-sem-instalar)).
 
 ```bash
-git clone <url-do-repositorio>
+git clone https://github.com/Lq-qm/pylibre.git
 cd pylibre
 pip install -e .        # instalação em modo editável
 # ou
