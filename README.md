@@ -107,9 +107,3 @@ pylibre/
    e `<style>`;
 5. **Limpeza** — normaliza espaços e quebras de linha, converte entidades HTML
    e junta tudo em um único `.txt` UTF-8.
-
-## Limitações conhecidas
-
-- Blocos `pre` (texto pré-formatado) perdem os espaços internos na normalização;
-- EPUBs protegidos por DRM não são suportados;
-- As células de tabelas são extraídas na ordem do documento (uma por linha).
