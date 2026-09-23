@@ -19,12 +19,20 @@ _BLOCK_TAGS = {
 }
 _SKIP_TAGS = {"head", "script", "style"}
 
+NCX_NS = "http://www.daisy.org/z3986/2005/ncx/"
+
+
+@dataclass
+class Chapter:
+    title: str = ""
+    text: str = ""
+
 
 @dataclass
 class Book:
     title: str = ""
     authors: list[str] = field(default_factory=list)
-    chapters: list[str] = field(default_factory=list)
+    chapters: list[Chapter] = field(default_factory=list)
 
 
 def _local(tag: object) -> str:
@@ -104,6 +112,67 @@ def extract_text(xhtml: bytes) -> str:
     return _normalize("".join(chunks))
 
 
+def chapter_title(xhtml: bytes) -> str:
+    """Retorna o <head><title> de um documento XHTML (ou vazio)."""
+    try:
+        root = ET.fromstring(_fix_entities(xhtml))
+    except ET.ParseError:
+        return ""
+    head = _child(root, "head")
+    el = _child(head, "title") if head is not None else None
+    if el is None:
+        return ""
+    return " ".join("".join(el.itertext()).split())
+
+
+def toc_titles(zf: zipfile.ZipFile, base: str, manifest: dict) -> dict[str, str]:
+    """Mapeia caminho de cada arquivo de texto -> rótulo do sumário (NCX)."""
+    href = None
+    for item in manifest.values():
+        if (item.get("media-type") or "").lower() == "application/x-dtbncx+xml":
+            href = item.get("href")
+            break
+    if href is None:
+        return {}
+    path = posixpath.normpath(posixpath.join(base, href))
+    try:
+        root = ET.fromstring(zf.read(path))
+    except (KeyError, ET.ParseError):
+        return {}
+    titles: dict[str, str] = {}
+    for nav in root.iter(f"{{{NCX_NS}}}navPoint"):
+        text = nav.findtext(f"{{{NCX_NS}}}navLabel/{{{NCX_NS}}}text")
+        content = nav.find(f"{{{NCX_NS}}}content")
+        if text is None or content is None:
+            continue
+        src = (content.get("src") or "").split("#", 1)[0]
+        if not src:
+            continue
+        key = posixpath.normpath(posixpath.join(base, src))
+        if key not in titles:
+            titles[key] = " ".join(text.split())
+    return titles
+
+
+def _looks_like_placeholder(title: str) -> bool:
+    """Heurística: título sem espaços, terminando em dígito e longo (ex.: 'ProblemaDosTresCorpos-3')."""
+    return not any(c.isspace() for c in title) and title[-1:].isdigit() and len(title) >= 8
+
+
+def _resolve_title(toc: dict[str, str], path: str, data: bytes, text: str) -> str:
+    """Título do capítulo: sumário (NCX) -> <head><title> -> primeira linha -> vazio."""
+    title = toc.get(path, "")
+    if not title:
+        head = chapter_title(data)
+        if head and not _looks_like_placeholder(head):
+            title = head
+    if not title:
+        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        if first and len(first) <= 60 and not re.search(r"[.!?…:]$", first):
+            title = first
+    return title
+
+
 def _opf_path(zf: zipfile.ZipFile) -> str:
     try:
         container = ET.fromstring(zf.read("META-INF/container.xml"))
@@ -140,6 +209,7 @@ def read_book(zf: zipfile.ZipFile) -> Book:
     } if manifest_el is not None else {}
 
     spine = _child(root, "spine")
+    toc = toc_titles(zf, base, manifest)
     for ref in (_children(spine, "itemref") if spine is not None else []):
         item = manifest.get(ref.get("idref"))
         if item is None or not item.get("href"):
@@ -149,11 +219,15 @@ def read_book(zf: zipfile.ZipFile) -> Book:
             continue
         path = posixpath.normpath(posixpath.join(base, item.get("href")))
         try:
-            text = extract_text(zf.read(path))
+            data = zf.read(path)
+            text = extract_text(data)
         except (ET.ParseError, KeyError):
             continue
-        if text:
-            book.chapters.append(text)
+        if not text:
+            continue
+        book.chapters.append(
+            Chapter(title=_resolve_title(toc, path, data, text), text=text)
+        )
 
     if not book.chapters:
         raise ValueError("nenhum capítulo com texto foi encontrado no EPUB")
