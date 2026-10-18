@@ -13,7 +13,9 @@ O projeto usa apenas a **biblioteca padrão do Python** — não há dependênci
 - Mantém o texto alternativo de imagens (`alt`), quando existir;
 - Inclui (opcionalmente) título e autor extraídos dos metadados do livro;
 - **Separação por capítulos** (opcional): com `--capitulos`, gera uma pasta
-  com um `.txt` por capítulo, em vez de um único arquivo.
+  com um `.txt` por capítulo, em vez de um único arquivo;
+- **Seleção interativa de capítulos** (opcional): com `--escolher`, lista os
+  capítulos numerados e pergunta quais extrair antes de converter.
 
 ## Requisitos
 
@@ -50,6 +52,7 @@ pylibre a.epub b.epub               # converte vários EPUBs de uma vez
 | `-o, --output ARQ` | Arquivo de saída (modo padrão) ou pasta de saída (`--capitulos`). Com vários EPUBs e `--capitulos`, funciona como pasta-base. |
 | `--no-meta` | Não inclui título e autor no início do `.txt` (ignorado com `--capitulos`). |
 | `--capitulos` | **Modo opcional**: gera uma pasta com um `.txt` por capítulo, em vez de um único arquivo. |
+| `--escolher` | **Modo opcional**: lista os capítulos numerados e pergunta quais extrair. Combina com os modos acima. |
 | `-h, --help` | Mostra a mensagem de ajuda e sai. |
 
 Sem `-o`, o arquivo de saída é `<entrada>.txt` na mesma pasta do EPUB
@@ -83,6 +86,38 @@ Regras de nomeação:
 - Nomes são sanitizados (caracteres inválidos viram espaço, máx. 80 caracteres)
   e duplicados recebem sufixo ` (2)`, ` (3)`…;
 - Arquivos já existentes com o mesmo nome são sobrescritos.
+
+### Seleção interativa de capítulos (`--escolher`)
+
+```bash
+pylibre --escolher livro.epub            # lista os capítulos e pergunta quais extrair
+pylibre --capitulos --escolher livro.epub  # seleciona e gera um .txt por capítulo escolhido
+```
+
+Antes de converter, a aplicação lista todos os capítulos numerados:
+
+```
+O problema dos três corpos — 43 capítulo(s):
+    1. Lista de personagens
+    2. Parte I
+    3. 1. Os anos de loucura
+    ...
+Seleção (ex.: 1,3,5 | 1-5 | t = todos | q = cancelar) [Enter = todos]:
+```
+
+Sintaxe da seleção:
+
+| Entrada | Efeito |
+| --- | --- |
+| `1,3,5` | Extrai apenas os capítulos 1, 3 e 5 |
+| `1-5` | Extrai o intervalo de 1 a 5 |
+| `1-3,7` | Combina intervalos e capítulos avulsos |
+| `t` (ou `a`, `*`, `todos`, Enter) | Extrai todos |
+| `q` (ou `sair`, `c`) | Cancela o livro atual, sem gerar arquivo |
+
+Comandos inválidos são rejeitados com uma nova pergunta. Com vários EPUBs,
+a seleção é feita livro por livro. O modo também funciona com entrada
+redirecionada (ex.: `echo "3" | pylibre --escolher livro.epub`).
 
 ### Exemplo de saída
 

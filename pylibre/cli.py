@@ -41,21 +41,90 @@ def _unique_name(name: str, used: set[str]) -> str:
     return result
 
 
+def _parse_selection(raw: str, total: int) -> list[int]:
+    """Converte a entrada do usuário em índices 1-based (ordenados).
+
+    Aceita: "t"/"a"/"*"/vazio (todos), "1,3,5", "1-5", combinações "1-3,7".
+    Lança ValueError para entradas inválidas.
+    """
+    s = raw.strip().lower()
+    if s in ("", "t", "a", "todos", "all", "*"):
+        return list(range(1, total + 1))
+    selected: set[int] = set()
+    for part in re.split(r"[,\s]+", s):
+        if not part:
+            continue
+        if "-" in part:
+            sides = part.split("-")
+            if len(sides) != 2 or not all(x.isdigit() for x in sides):
+                raise ValueError(f"faixa inválida: '{part}'")
+            a, b = int(sides[0]), int(sides[1])
+            lo, hi = (a, b) if a <= b else (b, a)
+        else:
+            if not part.isdigit():
+                raise ValueError(f"entrada inválida: '{part}'")
+            lo = hi = int(part)
+        if lo < 1 or hi > total:
+            raise ValueError(f"número fora do intervalo (1-{total})")
+        selected.update(range(lo, hi + 1))
+    if not selected:
+        raise ValueError("nenhum capítulo selecionado")
+    return sorted(selected)
+
+
+def _prompt_selection(book) -> list[int] | None:
+    """Lista os capítulos numerados e pergunta ao usuário quais extrair.
+
+    Retorna índices 1-based; None se o usuário cancelar ("q") ou fechar a entrada.
+    """
+    total = len(book.chapters)
+    nome = book.title or "(sem título)"
+    print(f"\n{nome} — {total} capítulo(s):")
+    for i, ch in enumerate(book.chapters, 1):
+        titulo = ch.title or f"capítulo {i}"
+        if len(titulo) > 60:
+            titulo = titulo[:57] + "..."
+        print(f"  {i:>3}. {titulo}")
+    while True:
+        try:
+            raw = input(
+                "Seleção (ex.: 1,3,5 | 1-5 | t = todos | q = cancelar) [Enter = todos]: "
+            )
+        except EOFError:
+            return None
+        if raw.strip().lower() in ("q", "quit", "sair", "c"):
+            return None
+        try:
+            return _parse_selection(raw, total)
+        except ValueError as exc:
+            print(f"  entrada inválida: {exc}")
+
+
 def convert(
     src: str,
     out: str | None = None,
     include_meta: bool = True,
     capitulos: bool = False,
     multi: bool = False,
+    selecionar: list[int] | None = None,
 ) -> tuple[str, str]:
     """Converte um EPUB em texto puro.
 
     - Modo padrão: gera um único `.txt` e devolve (caminho, "N caracteres").
     - Modo capítulos (`capitulos=True`): gera uma pasta com um `.txt` por
       capítulo e devolve (pasta, "N capítulos").
+    - `selecionar`: índices 1-based dos capítulos a extrair (None = todos).
+      A numeração original do livro é preservada nos nomes dos arquivos.
     """
     with zipfile.ZipFile(src) as zf:
         book = read_book(zf)
+
+    indices = selecionar or list(range(1, len(book.chapters) + 1))
+    chapters = [
+        (i, book.chapters[i - 1]) for i in indices if 1 <= i <= len(book.chapters)
+    ]
+    if not chapters:
+        raise ValueError("nenhum capítulo selecionado")
 
     if not capitulos:
         blocks: list[str] = []
@@ -64,7 +133,7 @@ def convert(
             if book.authors:
                 head += "\n" + ", ".join(book.authors)
             blocks.append(head)
-        blocks.extend(chapter.text for chapter in book.chapters)
+        blocks.extend(ch.text for _, ch in chapters)
         text = "\n\n".join(blocks).strip() + "\n"
         destino = Path(out) if out else Path(os.path.splitext(src)[0] + ".txt")
         destino.write_text(text, encoding="utf-8")
@@ -77,12 +146,12 @@ def convert(
         folder = Path(os.path.dirname(os.path.abspath(src))) / stem
     folder.mkdir(parents=True, exist_ok=True)
 
-    width = max(2, len(str(len(book.chapters))))
+    width = max(2, len(str(max(i for i, _ in chapters))))
     used: set[str] = set()
-    for i, chapter in enumerate(book.chapters, start=1):
+    for i, chapter in chapters:
         name = _unique_name(_chapter_filename(i, chapter.title, width), used)
         (folder / name).write_text(chapter.text.strip() + "\n", encoding="utf-8")
-    return str(folder) + "/", f"{len(book.chapters)} capítulos"
+    return str(folder) + "/", f"{len(chapters)} capítulos"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,6 +175,11 @@ def main(argv: list[str] | None = None) -> int:
         "--capitulos", action="store_true",
         help="gera uma pasta com um .txt por capítulo (em vez de um único arquivo)",
     )
+    parser.add_argument(
+        "--escolher", action="store_true",
+        help="lista os capítulos numerados e pergunta quais extrair "
+             "(1,3,5 | 1-5 | t = todos | q = cancelar)",
+    )
     args = parser.parse_args(argv)
 
     multi = len(args.epub) > 1
@@ -114,6 +188,22 @@ def main(argv: list[str] | None = None) -> int:
 
     failed = 0
     for src in args.epub:
+        selecionar = None
+        if args.escolher:
+            try:
+                with zipfile.ZipFile(src) as zf:
+                    book = read_book(zf)
+            except Exception as exc:
+                print(f"erro ao listar capítulos de {src}: {exc}", file=sys.stderr)
+                failed += 1
+                continue
+            try:
+                selecionar = _prompt_selection(book)
+            except KeyboardInterrupt:
+                selecionar = None
+            if selecionar is None:
+                print(f"cancelado: {src}")
+                continue
         try:
             saida, resumo = convert(
                 src,
@@ -121,6 +211,7 @@ def main(argv: list[str] | None = None) -> int:
                 include_meta=not args.no_meta,
                 capitulos=args.capitulos,
                 multi=multi,
+                selecionar=selecionar,
             )
         except FileNotFoundError:
             print(f"erro: arquivo não encontrado: {src}", file=sys.stderr)
